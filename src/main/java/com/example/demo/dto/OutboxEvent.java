@@ -2,6 +2,8 @@ package com.example.demo.dto;
 
 import jakarta.persistence.*;
 import lombok.Data;
+
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -16,9 +18,8 @@ public class OutboxEvent {
     private UUID taskId;
     private String eventType;
 
-    @Column(columnDefinition = "TEXT")
-    private String payload; // Сюда завернем JSON со списком URL
 
-    private String status = "PENDING"; // По умолчанию задача ждет отправки
+    private List<String> urls;
+    private String status;
 }
 
