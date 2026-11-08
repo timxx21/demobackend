@@ -1,5 +1,5 @@
 package com.example.demo.service;
-
+import lombok.extern.slf4j.Slf4j;
 import com.example.demo.dto.OutboxEvent;
 import com.example.demo.repository.OutboxRepository;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -7,6 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.util.List;
 
+@Slf4j
 @Service
 public class OutboxRelay {
 
@@ -25,7 +26,7 @@ public class OutboxRelay {
 
         if (pendingEvents.isEmpty()) return;
 
-        System.out.println("=== OutboxRelay: Найдено событий для отправки: " + pendingEvents.size() + " ===");
+        log.info("=== OutboxRelay: Найдено пакетов для обработки: {} ===", pendingEvents.size());
 
         for (OutboxEvent event : pendingEvents) {
             try {
@@ -37,10 +38,10 @@ public class OutboxRelay {
                     event.setStatus("PROCESSED");
                     outboxRepository.save(event);
 
-                    System.out.println("=== OutboxRelay: Событие " + event.getId() + " успешно улетело в Redis! ===");
+                    log.info("=== OutboxRelay: Событие {} успешно улетело в Redis! ===", event.getId());
                 }
             } catch (Exception e) {
-                System.err.println("Ошибка отправки в брокер для события " + event.getId() + ": " + e.getMessage());
+                log.error("[REDIS ERROR] Брокер недоступен: {}", e.getMessage());
                 // Если Redis недоступен — статус остается PENDING, транзакция не теряется!
             }
         }

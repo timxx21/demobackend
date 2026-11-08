@@ -48,11 +48,11 @@ public class TaskResponse {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
-    private UUID task_id; // Наш UUID задачи теперь является PRIMARY KEY!
+    private UUID taskId; // Наш UUID задачи теперь является PRIMARY KEY!
 
     @Column(nullable = false)
     private String status;
 
     @Column(nullable = false)
-    private int urls_count;
+    private int urlsCount;
 }

@@ -8,7 +8,7 @@ import com.example.demo.repository.TaskRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.util.UUID;
+
 
 @RestController
 @RequestMapping("/api/v1/task")
@@ -37,7 +37,7 @@ public class TaskController {
         // 3. логика аутбокс
         OutboxEvent event = new OutboxEvent();
 
-        event.setTaskId(savedTask.getTask_id());
+        event.setTaskId(savedTask.getTaskId());
         event.setUrls(request.getUrls());
         event.setStatus("QUEUED");
 

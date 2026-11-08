@@ -1,0 +1,5 @@
+    Ссылка на гугл диск
+        https://drive.google.com/drive/folders/1Uujjkai_roZwnpOjGlnB5jqpEPsTiSVb
+
+    Курл запрос
+        curl.exe -X POST http://localhost:8080/api/v1/task -H "Content-Type: application/json" -d ‘{\"urls\":[\"https://ya.ru\",\"https://google.com\"]}’
