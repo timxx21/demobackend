@@ -21,5 +21,8 @@ public class OutboxEvent {
 
     private List<String> urls;
     private String status;
+
+    private int retryCount = 0; // Сколько раз пытались
+    private String errorMessage; // Текст последней ошибки
 }
 
