@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "inbox_events")
@@ -11,12 +12,12 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class InboxEvent {
     @Id
-    private Long id; // ID из таблицы outbox_events
+    private UUID id; // ID из таблицы outbox_events
 
     @Column(name = "processed_at", nullable = false)
     private LocalDateTime processedAt = LocalDateTime.now();
 
-    public InboxEvent(Long id) {
+    public InboxEvent(UUID id) {
         this.id = id;
     }
 }

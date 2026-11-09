@@ -3,7 +3,8 @@ package com.example.demo.repository;
 import com.example.demo.dto.InboxEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import java.util.UUID;
 
 @Repository
-public interface InboxRepository extends JpaRepository<InboxEvent, Long> {
+public interface InboxRepository extends JpaRepository<InboxEvent, UUID> {
 }

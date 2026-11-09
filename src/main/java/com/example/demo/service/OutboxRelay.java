@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -75,11 +76,11 @@ public class OutboxRelay {
         }
     }
 
-    private boolean saveToInbox(Long eventId) { // Если ID = UUID, поменяй тип на UUID
+    private boolean saveToInbox(UUID eventId) { // Если ID = UUID, поменяй тип на UUID
         try {
             inboxRepository.saveAndFlush(new InboxEvent(eventId));
             return true;
-        } catch (Exception e) {
+        } catch (Exception _) {
             return false; // Ловим ошибку уникальности (дубль)
         }
     }

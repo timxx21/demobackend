@@ -20,14 +20,20 @@ public class HealthCheckService {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(5))
                     .GET()
                     .build();
 
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             return response.statusCode();
+        } catch (java.net.http.HttpTimeoutException _) {
+            // Специально ловим таймаут, чтобы было видно в логах
+            log.error("[HTTP TIMEOUT] Сайт {} не ответил за 5 секунд", url);
+            return 0;
         } catch (Exception e) {
             log.error("[HTTP ERROR] Ошибка пинга для {} : {}", url, e.getMessage());
-            return 0; // 0 — сайт недоступен или упал по таймауту
+            return 0;
         }
+
     }
 }
