@@ -11,7 +11,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.UUID;
-import com.example.demo.service.OutboxStatusService;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Slf4j
 @Service
@@ -22,7 +25,8 @@ public class OutboxRelay {
     private final StringRedisTemplate redisTemplate;
     private final HealthCheckService healthCheckService; // Добавлено
     private final OutboxStatusService outboxStatusService;
-
+    // Создаем пул из 10 потоков ("грузчиков"), которые будут делать пинги
+    private final ExecutorService pingExecutor = Executors.newFixedThreadPool(10);
     // Обновленный конструктор
     public OutboxRelay(OutboxRepository outboxRepository,
                        InboxRepository inboxRepository,
@@ -63,20 +67,35 @@ public class OutboxRelay {
                 continue;
             }
 
-            // 3. Пингуем URL-ы и собираем статистику
+            // 3. Пингуем URL-ы АСИНХРОННО
             log.info("[CONSUMER] Поток взял в работу задачу: {}", event.getTaskId());
 
-            boolean isAnyPingFailed = false;
-            String failedUrl = "";
+            // Список для сбора результатов из разных потоков
+            List<CompletableFuture<Integer>> futures = new java.util.ArrayList<>();
 
             for (String url : event.getUrls()) {
-                log.info("[CONSUMER] HTTP-пинг: {}", url);
-                int httpStatus = healthCheckService.pingUrl(url);
-                log.info("[CONSUMER] Результат для {} -> HTTP {}", url, httpStatus);
+                CompletableFuture<Integer> future = CompletableFuture.supplyAsync(() -> {
+                    log.info("[ASYNC] HTTP-пинг: {}", url);
+                    int httpStatus = healthCheckService.pingUrl(url);
+                    log.info("[ASYNC] Результат для {} -> HTTP {}", url, httpStatus);
+                    return httpStatus;
+                }, pingExecutor);
 
-                if (httpStatus == 0) { // 0 означает таймаут или ошибку соединения
+                futures.add(future);
+            }
+
+            // Ждем, пока ВСЕ пинги этой пачки завершатся, и собираем результаты
+            List<Integer> results = futures.stream()
+                    .map(CompletableFuture::join) // join() блокирует поток, но только для сбора результатов
+                    .toList();
+
+            // Проверяем, был ли хоть один провал
+            boolean isAnyPingFailed = false;
+            String failedUrl = "";
+            for (int i = 0; i < results.size(); i++) {
+                if (results.get(i) == 0) {
                     isAnyPingFailed = true;
-                    failedUrl = url;
+                    failedUrl = event.getUrls().get(i); // Запоминаем, какой именно URL упал
                 }
             }
 
@@ -90,6 +109,7 @@ public class OutboxRelay {
                     outboxStatusService.updateStatus(event, "FAILED"); // Мертвая буква
                 } else {
                     log.warn("[RETRY] Ошибка пинга. Попытка {}/3. Возвращаем задачу {}.", event.getRetryCount(), event.getId());
+                    inboxRepository.deleteById(event.getId());
                     outboxStatusService.updateStatus(event, "QUEUED"); // Вернем в очередь на повтор
                 }
             } else {
@@ -99,12 +119,15 @@ public class OutboxRelay {
         }
     }
 
-    private boolean saveToInbox(UUID eventId) { // Если ID = UUID, поменяй тип на UUID
+    private boolean saveToInbox(UUID eventId) {
+        if (inboxRepository.existsById(eventId)) {
+            return false; // Уже есть! Дубль.
+        }
         try {
             inboxRepository.saveAndFlush(new InboxEvent(eventId));
             return true;
-        } catch (Exception _) {
-            return false; // Ловим ошибку уникальности (дубль)
+        } catch (Exception e) {
+            return false;
         }
     }
 
