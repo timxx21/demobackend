@@ -4,11 +4,14 @@ import com.example.demo.dto.OutboxEvent;
 import com.example.demo.dto.InboxEvent;
 import com.example.demo.repository.OutboxRepository;
 import com.example.demo.repository.InboxRepository;
+
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +30,9 @@ public class OutboxRelay {
     private final OutboxStatusService outboxStatusService;
     // Создаем пул из 10 потоков ("грузчиков"), которые будут делать пинги
     private final ExecutorService pingExecutor = Executors.newFixedThreadPool(10);
+    // Создаем пул из 5 потоков ("грузчиков"), которые будут делать задачи
+    private final ExecutorService taskExecutor = Executors.newFixedThreadPool(5);
+
     // Обновленный конструктор
     public OutboxRelay(OutboxRepository outboxRepository,
                        InboxRepository inboxRepository,
@@ -45,81 +51,81 @@ public class OutboxRelay {
         List<OutboxEvent> pendingEvents = outboxRepository.findByStatus("QUEUED");
         if (pendingEvents.isEmpty()) return;
 
-        log.info("=== OutboxRelay: Найдено пакетов для обработки: {} ===", pendingEvents.size());
+        log.info("=== OutboxRelay: Найдено пакетов: {}. Отправляем в taskExecutor ===", pendingEvents.size());
 
         for (OutboxEvent event : pendingEvents) {
-            // 1. Пушим в Redis
-            try {
-                for (String url : event.getUrls()) {
-                    redisTemplate.opsForList().leftPush("task-queue", url);
-                }
-                log.info("[REDIS] Пакет URL успешно опубликован в task-queue для события {}", event.getId());
-            } catch (Exception e) {
-                log.error("[REDIS ERROR] Брокер недоступен: {}", e.getMessage());
-                continue;
+            // 1. Отдаем задачу в пул задач
+            // ВАЖНО: Сразу ставим статус IN_PROCESS, чтобы шедулер не взял их снова через 5 секунд
+            outboxStatusService.updateStatus(event, "IN_PROCESS");
+
+            taskExecutor.submit(() -> processSingleEvent(event));
+        }
+    }
+
+    private void processSingleEvent(OutboxEvent event) {
+        try {
+            // 1. Redis
+            for (String url : event.getUrls()) {
+                redisTemplate.opsForList().leftPush("task-queue", url);
             }
 
-            // 2. Проверяем Inbox (защита от дублей)
+            // 2. Inbox
             boolean isUnique = saveToInbox(event.getId());
             if (!isUnique) {
-                log.info("[TRANSACTIONAL INBOX] Дубль события {}. Пропускаем пинг.", event.getId());
+                log.info("[INBOX] Дубль события {}. Пропускаем.", event.getId());
                 outboxStatusService.updateStatus(event, "PROCESSED");
-                continue;
+                return;
             }
+            log.info("[CONSUMER] Поток {} взял задачу: {}", Thread.currentThread().getName(), event.getTaskId());
 
-            // 3. Пингуем URL-ы АСИНХРОННО
-            log.info("[CONSUMER] Поток взял в работу задачу: {}", event.getTaskId());
-
-            // Список для сбора результатов из разных потоков
             List<CompletableFuture<Integer>> futures = new java.util.ArrayList<>();
 
             for (String url : event.getUrls()) {
+                // 2. Отдаем URL в пул пингов
                 CompletableFuture<Integer> future = CompletableFuture.supplyAsync(() -> {
-                    log.info("[ASYNC] HTTP-пинг: {}", url);
+                    log.info("[PING] HTTP-пинг: {}", url);
                     int httpStatus = healthCheckService.pingUrl(url);
-                    log.info("[ASYNC] Результат для {} -> HTTP {}", url, httpStatus);
+                    log.info("[PING] Результат для {} -> HTTP {}", url, httpStatus);
                     return httpStatus;
                 }, pingExecutor);
 
                 futures.add(future);
             }
 
-            // Ждем, пока ВСЕ пинги этой пачки завершатся, и собираем результаты
-            List<Integer> results = futures.stream()
-                    .map(CompletableFuture::join) // join() блокирует поток, но только для сбора результатов
-                    .toList();
+            // Ждем завершения ВСЕХ пингов для этой задачи
+            List<Integer> results = futures.stream().map(CompletableFuture::join).toList();
 
-            // Проверяем, был ли хоть один провал
+            // 4. Логика DLQ и Retry
             boolean isAnyPingFailed = false;
             String failedUrl = "";
             for (int i = 0; i < results.size(); i++) {
                 if (results.get(i) == 0) {
                     isAnyPingFailed = true;
-                    failedUrl = event.getUrls().get(i); // Запоминаем, какой именно URL упал
+                    failedUrl = event.getUrls().get(i);
                 }
             }
 
-            // 4. ЛОГИКА DEAD LETTER QUEUE И RETRY
             if (isAnyPingFailed) {
                 event.setRetryCount(event.getRetryCount() + 1);
                 event.setErrorMessage("Timeout or connection refused for " + failedUrl);
 
                 if (event.getRetryCount() >= 3) {
-                    log.error("[DLQ] Задача {} провалилась 3 раза. Отправляем в DLQ (статус FAILED).", event.getId());
-                    outboxStatusService.updateStatus(event, "FAILED"); // Мертвая буква
+                    log.error("[DLQ] Задача {} ушла в DLQ (FAILED).", event.getId());
+                    outboxStatusService.updateStatus(event, "FAILED");
                 } else {
-                    log.warn("[RETRY] Ошибка пинга. Попытка {}/3. Возвращаем задачу {}.", event.getRetryCount(), event.getId());
+                    log.warn("[RETRY] Попытка {}/3. Возвращаем задачу {}.", event.getRetryCount(), event.getId());
                     inboxRepository.deleteById(event.getId());
-                    outboxStatusService.updateStatus(event, "QUEUED"); // Вернем в очередь на повтор
+                    outboxStatusService.updateStatus(event, "QUEUED");
                 }
             } else {
-                // Все сайты ответили успешно (200, 301 и т.д.)
-                outboxStatusService.updateStatus(event, "PROCESSED"); // Успех
+                outboxStatusService.updateStatus(event, "PROCESSED");
             }
+
+        } catch (Exception e) {
+            log.error("Ошибка при обработке события {}: {}", event.getId(), e.getMessage());
         }
     }
-
-    private boolean saveToInbox(UUID eventId) {
+    private boolean saveToInbox (UUID eventId){
         if (inboxRepository.existsById(eventId)) {
             return false; // Уже есть! Дубль.
         }
@@ -132,8 +138,86 @@ public class OutboxRelay {
     }
 
     @Transactional
-    public void updateEventStatus(OutboxEvent event, String status) {
+    public void updateEventStatus (OutboxEvent event, String status){
         event.setStatus(status);
         outboxRepository.save(event);
     }
 }
+//    public void processOutbox() {
+//        List<OutboxEvent> pendingEvents = outboxRepository.findByStatus("QUEUED");
+//        if (pendingEvents.isEmpty()) return;
+//
+//        log.info("=== OutboxRelay: Найдено пакетов для обработки: {} ===", pendingEvents.size());
+//
+//        for (OutboxEvent event : pendingEvents) {
+//            // 1. Пушим в Redis
+//            try {
+//                for (String url : event.getUrls()) {
+//                    redisTemplate.opsForList().leftPush("task-queue", url);
+//                }
+//                log.info("[REDIS] Пакет URL успешно опубликован в task-queue для события {}", event.getId());
+//            } catch (Exception e) {
+//                log.error("[REDIS ERROR] Брокер недоступен: {}", e.getMessage());
+//                continue;
+//            }
+//
+//            // 2. Проверяем Inbox (защита от дублей)
+//            boolean isUnique = saveToInbox(event.getId());
+//            if (!isUnique) {
+//                log.info("[TRANSACTIONAL INBOX] Дубль события {}. Пропускаем пинг.", event.getId());
+//                outboxStatusService.updateStatus(event, "PROCESSED");
+//                continue;
+//            }
+//
+//            // 3. Пингуем URL-ы АСИНХРОННО
+//            log.info("[CONSUMER] Поток взял в работу задачу: {}", event.getTaskId());
+//
+//            // Список для сбора результатов из разных потоков
+//            List<CompletableFuture<Integer>> futures = new java.util.ArrayList<>();
+//
+//            for (String url : event.getUrls()) {
+//                CompletableFuture<Integer> future = CompletableFuture.supplyAsync(() -> {
+//                    log.info("[ASYNC] HTTP-пинг: {}", url);
+//                    int httpStatus = healthCheckService.pingUrl(url);
+//                    log.info("[ASYNC] Результат для {} -> HTTP {}", url, httpStatus);
+//                    return httpStatus;
+//                }, pingExecutor);
+//
+//                futures.add(future);
+//            }
+//
+//            // Ждем, пока ВСЕ пинги этой пачки завершатся, и собираем результаты
+//            List<Integer> results = futures.stream()
+//                    .map(CompletableFuture::join) // join() блокирует поток, но только для сбора результатов
+//                    .toList();
+//
+//            // Проверяем, был ли хоть один провал
+//            boolean isAnyPingFailed = false;
+//            String failedUrl = "";
+//            for (int i = 0; i < results.size(); i++) {
+//                if (results.get(i) == 0) {
+//                    isAnyPingFailed = true;
+//                    failedUrl = event.getUrls().get(i); // Запоминаем, какой именно URL упал
+//                }
+//            }
+//
+//            // 4. ЛОГИКА DEAD LETTER QUEUE И RETRY
+//            if (isAnyPingFailed) {
+//                event.setRetryCount(event.getRetryCount() + 1);
+//                event.setErrorMessage("Timeout or connection refused for " + failedUrl);
+//
+//                if (event.getRetryCount() >= 3) {
+//                    log.error("[DLQ] Задача {} провалилась 3 раза. Отправляем в DLQ (статус FAILED).", event.getId());
+//                    outboxStatusService.updateStatus(event, "FAILED"); // Мертвая буква
+//                } else {
+//                    log.warn("[RETRY] Ошибка пинга. Попытка {}/3. Возвращаем задачу {}.", event.getRetryCount(), event.getId());
+//                    inboxRepository.deleteById(event.getId());
+//                    outboxStatusService.updateStatus(event, "QUEUED"); // Вернем в очередь на повтор
+//                }
+//            } else {
+//                // Все сайты ответили успешно (200, 301 и т.д.)
+//                outboxStatusService.updateStatus(event, "PROCESSED"); // Успех
+//            }
+//        }
+//    }
+

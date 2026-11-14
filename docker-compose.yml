@@ -1,7 +1,7 @@
 services:
   postgres-db:
     image: postgres:15-alpine
-    container_name: health_checker_db
+    container_name: health_checker_dbSurprise
     ports:
       - "5433:5432"
     environment:
@@ -13,7 +13,7 @@ services:
 
   redis-broker:
     image: redis:7.0-alpine
-    container_name: health_checker_redis
+    container_name: health_checker_redisSurprise
     ports:
       - "6379:6379"
 
