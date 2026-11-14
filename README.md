@@ -49,3 +49,4 @@ curl.exe -X POST http://localhost:8080/api/v1/task -H "Content-Type: application
 ```
 После отправки запроса в логах приложения вы увидите, как шедулер подхватывает задачу, пушит URL в Redis, проверяет Inbox и выполняет HTTP-пинги.
 
+<img width="1283" height="338" alt="image" src="https://github.com/user-attachments/assets/0b040f2c-48d3-4f20-aa69-6604b311799b" />
