@@ -29,9 +29,11 @@ public class OutboxRelay {
 
         for (OutboxEvent event : pendingEvents) {
             try {
-                // 2. Пушим сообщение в очередь Redis под именем "task-queue"
+                // Внутри цикла for (OutboxEvent event : pendingEvents) в OutboxRelay.java:
                 for (String url : event.getUrls()) {
-                    redisTemplate.opsForList().leftPush("task-queue", url);
+                    // Упаковываем ID события (для Inbox), ID задачи и сам URL в одно сообщение
+                    String message = event.getId() + "|" + event.getTaskId() + "|" + url;
+                    redisTemplate.opsForList().leftPush("task-queue", message);
                 }
 
                 // 3. Если Redis принял пакет — меняем статус в PostgreSQL на PROCESSED

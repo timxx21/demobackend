@@ -7,7 +7,7 @@ import lombok.AllArgsConstructor;
 import java.util.UUID;
 
 @Entity
-@Table(name = "check_results")
+@Table(name = "tasks")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

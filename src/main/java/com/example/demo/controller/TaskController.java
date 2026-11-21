@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import com.example.demo.dto.OutboxEvent;
 import com.example.demo.dto.TaskRequest;
 import com.example.demo.dto.TaskResponse;
+import com.example.demo.repository.CheckResultRepository;
 import com.example.demo.repository.OutboxRepository;
 import com.example.demo.repository.TaskRepository;
 import org.springframework.http.HttpStatus;
@@ -17,13 +18,30 @@ public class TaskController {
 
     private final TaskRepository taskRepository;
     private final OutboxRepository outboxRepository; // Внедряем твой outbox
-
+    private final CheckResultRepository checkResultRepository;
     // Конструктор внедрения зависимостей для двух репозиториев
-    public TaskController(TaskRepository taskRepository, OutboxRepository outboxRepository) {
+    public TaskController(TaskRepository taskRepository, OutboxRepository outboxRepository, CheckResultRepository checkResultRepository) {
         this.taskRepository = taskRepository;
         this.outboxRepository = outboxRepository;
+        this.checkResultRepository = checkResultRepository;
     }
+    // Внедряем CheckResultRepository в конструктор TaskController и добавляем метод:
 
+    @GetMapping("/{taskId}")
+    public ResponseEntity<?> getTaskStatus(@PathVariable UUID taskId) {
+        var taskOpt = taskRepository.findById(taskId);
+        if (taskOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        var results = checkResultRepository.findByTaskId(taskId);
+
+        // Возвращаем и статус самой задачи, и список всех проверенных сайтов!
+        return ResponseEntity.ok(java.util.Map.of(
+                "task", taskOpt.get(),
+                "results", results
+        ));
+    }
     @PostMapping
     @Transactional // Гарантирует, что и задача, и outbox запишутся вместе
     public ResponseEntity<TaskResponse> createTask(@RequestBody TaskRequest request) {
@@ -40,13 +58,13 @@ public class TaskController {
 
         // 3. Проходим циклом по пришедшим URL и пишем логику Outbox
 
-            OutboxEvent event = new OutboxEvent();
+        OutboxEvent event = new OutboxEvent();
 
-            event.setTaskId(savedTask.getTask_id());
-            event.setUrls(request.getUrls());
-            event.setStatus("QUEUED"); // Твой стандарт статуса
+        event.setTaskId(savedTask.getTask_id());
+        event.setUrls(request.getUrls());
+        event.setStatus("QUEUED"); // Твой стандарт статуса
 
-            outboxRepository.save(event);
+        outboxRepository.save(event);
 
 
         // 4. Возвращаем клиенту объект savedTask, там уже будет красивый ID, а не null
