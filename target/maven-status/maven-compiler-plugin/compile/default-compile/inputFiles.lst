@@ -1,0 +1,13 @@
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\controller\TaskController.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\DemoApplication.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\dto\InboxEvent.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\dto\OutboxEvent.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\dto\TaskRequest.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\dto\TaskResponse.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\repository\InboxRepository.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\repository\OutboxRepository.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\repository\TaskRepository.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\service\HealthCheckService.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\service\OutboxRelay.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\com\example\demo\service\TaskService.java
+C:\Users\user\IdeaProjects\LabSpring-main\src\main\java\org\example\Main.java
